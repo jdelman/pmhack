@@ -12,7 +12,10 @@ a `commit-msg` hook for git to integrate w/asana
 ### clone the repo
 - put it somewhere. just do it
 - run `npm install`
-- symlink or copy `commit-msg` to the `.git/hooks` directory of your project
+- make sure `commit-msg.sh` is executable
+  - you could try `chmod +x commit-msg.sh`
+- symlink `commit-msg.sh` -> `.git/hooks/commit-msg` in your project
+  - you might try `ln -s ./commit-msg.sh /absolute/path/to/my/project/.git/hooks/commit-msg`
 
 ### done
 
