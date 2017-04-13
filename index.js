@@ -1,7 +1,27 @@
-// set asana personal token as ASANA_TOKEN=[mytoken]
+#!/usr/bin/env node
+
+const fs = require('fs');
+
+// capture stdin during commit hook?
+// fs.createReadStream('/dev/tty').pipe(process.stdin);
 
 const request = require('request');
 const inquirer = require('inquirer');
+
+let commitFile;
+if (!process.env.DEBUG) {
+  if (process.argv[0].endsWith('node')) {
+    commitFile = process.argv[2];
+  }
+  else {
+    commitFile = process.argv[1];
+  }
+  console.log('file=', commitFile);
+  if (!commitFile) {
+    console.error('[pmhack] did not get a commit file from git hook');
+    process.exit(0);
+  }
+}
 
 const token = process.env.ASANA_TOKEN;
 const workspace = process.env.ASANA_WORKSPACE;
@@ -67,16 +87,25 @@ getTasks((err, tasks) => {
     value: null
   }].concat(tasks.map(task => ({
     name: getShortTask(task.name),
-    value: task.id
+    value: task
   })));
   inquirer.prompt({
     type: 'list',
-    name: 'taskId',
+    name: 'task',
     message: 'Is there a task associated with this commit?',
     default: null,
     choices: choices,
     pageSize: 8
   }).then(answer => {
-    console.log('you chose', answer);
+    const { task } = answer;
+    const msg = `\nasana task: ${ task.name }\nasana id: ${ task.id }`;
+    if (commitFile) {
+      console.log('got here');
+      fs.appendFileSync(commitFile, msg);
+    }
+    else {
+      console.log('if i had a commit file, i would have written:')
+      console.log(msg);
+    }
   });
 });
