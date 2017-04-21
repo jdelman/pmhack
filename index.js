@@ -22,9 +22,6 @@ if (!DEBUG) {
     process.exit(1);
   }
 
-  console.log('chose hook:', hook);
-  console.log('args:', process.argv);
-
   // check commit file
   if (hook === 'commit-msg') {
     commitFile = process.argv[3];
@@ -37,6 +34,11 @@ if (!DEBUG) {
 }
 else {
   hook = 'commit-msg';
+}
+
+if (DEBUG) {
+  console.log('chose hook:', hook);
+  console.log('args:', process.argv);
 }
 
 const token = process.env.ASANA_TOKEN;
@@ -152,9 +154,16 @@ if (hook === 'commit-msg') {
       pageSize: 8
     }).then(answer => {
       const { task } = answer;
+
+      // if they chose no task, set the last asana task id to an empty string
+      if (!task) {
+        fs.writeFileSync(getPathToLastAsanaTask(), '');
+        process.exit(0);
+      }
+
       const msg = `\nasana task: ${ task.name }\nasana url: https://app.asana.com/0/${ process.env.ASANA_WORKSPACE }/${ task.id }`;
       if (commitFile) {
-        console.log('got here');
+        // console.log('got here');
         fs.appendFileSync(commitFile, msg);
       }
       else {
@@ -174,6 +183,11 @@ else if (hook === 'post-commit') {
       console.error('[pmhack] error getting last task id:', err);
       process.exit(1);
     }
+    else if (!taskId) {
+      // we didn't assign a task id
+      console.log('[pmhack] no task id set');
+      process.exit(0);
+    }
 
     getLastCommitHash((err, hash) => {
       if (err) {
@@ -181,7 +195,7 @@ else if (hook === 'post-commit') {
         process.exit(1);
       }
 
-      const comment = `referenced by https://github.com/${ repo }/${ hash }`;
+      const comment = `referenced by https://github.com/${ repo }/commit/${ hash }`;
       addCommentToTask(taskId, comment, (err, ok) => {
         if (err) {
           console.error(`error adding comment to task: ${ err }`);
