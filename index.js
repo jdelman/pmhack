@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const path = require('path');
+const child_process = require('child_process');
 
 // capture stdin during commit hook?
 // fs.createReadStream('/dev/tty').pipe(process.stdin);
@@ -8,23 +10,33 @@ const fs = require('fs');
 const request = require('request');
 const inquirer = require('inquirer');
 
+/* warm up */
 let commitFile;
-if (!process.env.DEBUG) {
-  if (process.argv[0].endsWith('node')) {
-    commitFile = process.argv[2];
+let hook;
+const { DEBUG } = process.env;
+if (!DEBUG) {
+  // check hook
+  hook = process.argv[2];
+  if (hook !== 'commit-msg' && hook !== 'post-commit') {
+    console.error('[pmhack] please specify whether you need the `commit-msg` or `post-commit` hook.');
+    process.exit(1);
   }
-  else {
-    commitFile = process.argv[1];
-  }
+
+  // check commit file
+  commitFile = process.argv[3];
   console.log('file=', commitFile);
   if (!commitFile) {
     console.error('[pmhack] did not get a commit file from git hook');
-    process.exit(0);
+    process.exit(1);
   }
+}
+else {
+  hook = 'commit-msg';
 }
 
 const token = process.env.ASANA_TOKEN;
 const workspace = process.env.ASANA_WORKSPACE;
+const repo = process.env.ASANA_GITHUB_REPO;
 if (!token) {
   console.error(`
     You need to set your personal Asana token in the environment
@@ -39,6 +51,13 @@ if (!workspace) {
   console.error(`
     You need to set your Asana workspace (ASANA_WORKSPACE environment
     variable).
+  `);
+  process.exit(1);
+}
+if (!DEBUG && !repo) {
+  console.error(`
+    You need to set the GitHub repo (i.e. REPO_OWNER/REPO_NAME) in the
+    ASANA_GITHUB_REPO environment variable.
   `);
   process.exit(1);
 }
@@ -62,7 +81,18 @@ const getTasks = cb => {
       opt_fields: 'id,name,due_on'
     }
   }, (err, resp, body) => {
-    if (err || !body.data) return cb(err || body);
+    if (err || !body.data) return cb(err || JSON.stringify(body));
+    return cb(null, body.data);
+  });
+};
+
+const addCommentToTask = (taskId, comment, cb) => {
+  asana({
+    method: 'POST',
+    uri: `tasks/${ taskId }/stories`,
+    text: comment
+  }, (err, resp, body) => {
+    if (err || !body.data) return cb(err || JSON.stringify(body));
     return cb(null, body.data);
   });
 };
@@ -76,36 +106,87 @@ const getShortTask = name => {
   return out;
 };
 
-getTasks((err, tasks) => {
-  if (err) {
-    console.error(`Error getting your Asana tasks: ${ err }`);
-    process.exit(1);
-  }
-  // set up questions
-  const choices = [{
-    name: '[default] Do not associate a task with this commit',
-    value: null
-  }].concat(tasks.map(task => ({
-    name: getShortTask(task.name),
-    value: task
-  })));
-  inquirer.prompt({
-    type: 'list',
-    name: 'task',
-    message: 'Is there a task associated with this commit?',
-    default: null,
-    choices: choices,
-    pageSize: 8
-  }).then(answer => {
-    const { task } = answer;
-    const msg = `\nasana task: ${ task.name }\nasana id: ${ task.id }`;
-    if (commitFile) {
-      console.log('got here');
-      fs.appendFileSync(commitFile, msg);
-    }
-    else {
-      console.log('if i had a commit file, i would have written:')
-      console.log(msg);
-    }
+const getLastCommitHash = cb => {
+  child_process.exec('git rev-list HEAD', (err, stdout) => {
+    if (err) return cb(err);
+
+    // should be three lines returned -- we just want the first.
+    const hash = stdout.split('\n')[0];
+    return cb(null, hash);
   });
-});
+};
+
+const getPathToLastAsanaTask = () => path.resolve(process.env.HOME, '.LAST_ASANA_TASK');
+
+
+/* program execution */
+
+if (hook === 'commit-msg') {
+  // prompt the user with a list of their tasks.
+  // on selection, add that task's URL to the commit description.
+
+  getTasks((err, tasks) => {
+    if (err) {
+      console.error(`Error getting your Asana tasks: ${ err }`);
+      process.exit(1);
+    }
+    // set up questions
+    const choices = [{
+      name: '[default] Do not associate a task with this commit',
+      value: null
+    }].concat(tasks.map(task => ({
+      name: getShortTask(task.name),
+      value: task
+    })));
+    inquirer.prompt({
+      type: 'list',
+      name: 'task',
+      message: 'Is there a task associated with this commit?',
+      default: null,
+      choices: choices,
+      pageSize: 8
+    }).then(answer => {
+      const { task } = answer;
+      const msg = `\nasana task: ${ task.name }\nasana url: https://app.asana.com/0/${ process.env.ASANA_WORKSPACE }/${ task.id }`;
+      if (commitFile) {
+        console.log('got here');
+        fs.appendFileSync(commitFile, msg);
+      }
+      else {
+        console.log('if i had a commit file, i would have written:')
+        console.log(msg);
+      }
+
+      // keep a hidden reference to the last asana task in the user's directory
+      fs.writeFileSync(getPathToLastAsanaTask(), task.id);
+    });
+  });
+}
+else if (hook === 'post-commit') {
+  // take the commit hash and add it as a comment to the asana task.
+  fs.readFile(getPathToLastAsanaTask(), { encoding: 'utf8' }, (err, taskId) => {
+    if (err) {
+      console.error('[pmhack] error getting last task id:', err);
+      process.exit(1);
+    }
+
+    getLastCommitHash((err, hash) => {
+      if (err) {
+        console.error(`[pmhack] error getting last commit hash: ${ err }`);
+        process.exit(1);
+      }
+
+      const comment = `referenced by https://github.com/${ repo }/${ commitHash }`;
+      addCommentToTask(taskId, (err, ok) => {
+        if (err) {
+          console.error(`error adding comment to task: ${ err }`);
+          process.exit(1);
+        }
+
+        // success!
+        console.log(`successfully added reference to commit ${ commitHash } in asana task ${ taskId }`);
+        process.exit(0);
+      });
+    });
+  });
+}
