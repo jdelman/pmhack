@@ -5,5 +5,5 @@
 # `exec <&-` puts it back.
 
 exec < /dev/tty
-node index.js $1
+node index.js commit-msg $1
 exec <&-

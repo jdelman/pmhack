@@ -22,12 +22,17 @@ if (!DEBUG) {
     process.exit(1);
   }
 
+  console.log('chose hook:', hook);
+  console.log('args:', process.argv);
+
   // check commit file
-  commitFile = process.argv[3];
-  console.log('file=', commitFile);
-  if (!commitFile) {
-    console.error('[pmhack] did not get a commit file from git hook');
-    process.exit(1);
+  if (hook === 'commit-msg') {
+    commitFile = process.argv[3];
+    // console.log('file=', commitFile);
+    if (!commitFile) {
+      console.error('[pmhack] did not get a commit file from git hook');
+      process.exit(1);
+    }
   }
 }
 else {
@@ -90,7 +95,7 @@ const addCommentToTask = (taskId, comment, cb) => {
   asana({
     method: 'POST',
     uri: `tasks/${ taskId }/stories`,
-    text: comment
+    json: { data: { text: comment } }
   }, (err, resp, body) => {
     if (err || !body.data) return cb(err || JSON.stringify(body));
     return cb(null, body.data);
@@ -176,15 +181,15 @@ else if (hook === 'post-commit') {
         process.exit(1);
       }
 
-      const comment = `referenced by https://github.com/${ repo }/${ commitHash }`;
-      addCommentToTask(taskId, (err, ok) => {
+      const comment = `referenced by https://github.com/${ repo }/${ hash }`;
+      addCommentToTask(taskId, comment, (err, ok) => {
         if (err) {
           console.error(`error adding comment to task: ${ err }`);
           process.exit(1);
         }
 
         // success!
-        console.log(`successfully added reference to commit ${ commitHash } in asana task ${ taskId }`);
+        console.log(`successfully added reference to commit ${ hash } in asana task ${ taskId }`);
         process.exit(0);
       });
     });
