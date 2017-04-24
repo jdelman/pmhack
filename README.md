@@ -1,6 +1,6 @@
 # pmhack
 
-a `commit-msg` hook for git to integrate w/asana
+a `commit-msg` hook for git to integrate w/asana & github
 
 ## but how?
 
